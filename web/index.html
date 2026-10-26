@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deep Work</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <h1>Deep Work</h1>
+      <p class="muted" id="updated"></p>
+    </header>
+
+    <p class="card notice" id="notice" hidden></p>
+
+    <section class="card hero" style="--i:0">
+      <div class="ring-wrap">
+        <div id="ring"></div>
+        <div class="ring-center">
+          <div class="ring-pct" id="ringPct">0%</div>
+          <div class="muted">of goal</div>
+        </div>
+      </div>
+      <div class="hero-text">
+        <div class="label" id="heroLabel">Hours left to 10,000</div>
+        <div class="hero-number" id="hoursLeft">10,000</div>
+        <p class="sub" id="heroSub"></p>
+      </div>
+    </section>
+
+    <section class="tiles" id="tiles"></section>
+
+    <section class="card" style="--i:2">
+      <h2>Last 12 months</h2>
+      <div class="scroll-x" id="heatmap"></div>
+      <div class="heat-legend" id="heatLegend"></div>
+    </section>
+
+    <div class="grid-2">
+      <section class="card" style="--i:3">
+        <h2>Hours per week</h2>
+        <p class="sub">Last 26 weeks</p>
+        <div id="weekly"></div>
+      </section>
+      <section class="card" style="--i:4">
+        <h2>Time per tag</h2>
+        <div class="donut" id="tags"></div>
+      </section>
+    </div>
+
+    <section class="card" style="--i:5">
+      <h2>Total hours over time</h2>
+      <div id="cumulative"></div>
+    </section>
+
+    <section class="card" style="--i:6">
+      <h2>Recent sessions</h2>
+      <div class="scroll-x" id="recent"></div>
+    </section>
+  </main>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
