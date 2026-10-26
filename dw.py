@@ -31,8 +31,8 @@ GOAL_HOURS = 10_000
 HEADER = (
     "# Deep Work Log\n"
     "\n"
-    "| Date | Time | Duration | Tag | Description |\n"
-    "|------|------|----------|-----|-------------|\n"
+    "| Date | Time | Duration | Project | Description |\n"
+    "|------|------|----------|---------|-------------|\n"
 )
 CELL_SPLIT = re.compile(r"(?<!\\)\|")  # split on | but not on \|
 
@@ -54,7 +54,7 @@ def read_records():
         if not cells or cells[0] == "Date" or set(cells[0]) <= set("-: "):
             continue  # header or separator row
         try:
-            date, time, minutes, tag, description = cells
+            date, time, minutes, project, description = cells
             datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
             minutes = int(minutes)
             if minutes <= 0:
@@ -66,7 +66,7 @@ def read_records():
             "date": date,
             "time": time,
             "minutes": minutes,
-            "tag": tag,
+            "project": project,
             "description": description.replace("\\|", "|"),
         })
     records.sort(key=lambda r: (r["date"], r["time"]))
@@ -77,7 +77,7 @@ def write_record(rec):
     """Append one record as a table row, creating the file with a header if needed."""
     text = LOG_FILE.read_text(encoding="utf-8") if LOG_FILE.exists() else ""
     description = rec["description"].replace("|", "\\|")
-    row = f"| {rec['date']} | {rec['time']} | {rec['minutes']} | {rec['tag']} | {description} |\n"
+    row = f"| {rec['date']} | {rec['time']} | {rec['minutes']} | {rec['project']} | {description} |\n"
     with LOG_FILE.open("a", encoding="utf-8", newline="\n") as f:
         if not text.strip():
             f.write(HEADER)
@@ -124,20 +124,20 @@ def parse_minutes(text):
     return minutes
 
 
-def check_tag(text):
-    tag = text.strip()
-    if not tag or "|" in tag:
-        raise ValueError("Tag can't be empty or contain |")
-    return tag
+def check_project(text):
+    project = text.strip()
+    if not project or "|" in project:
+        raise ValueError("Project can't be empty or contain |")
+    return project
 
 
-def recent_tags(records):
-    """Tags ordered by most recent use."""
-    tags = []
+def recent_projects(records):
+    """Projects ordered by most recent use."""
+    projects = []
     for r in reversed(records):
-        if r["tag"] not in tags:
-            tags.append(r["tag"])
-    return tags
+        if r["project"] not in projects:
+            projects.append(r["project"])
+    return projects
 
 
 def ask(prompt, check, default=""):
@@ -153,20 +153,20 @@ def ask(prompt, check, default=""):
 def cmd_add(args):
     records = read_records()
     if args and len(args) < 3:
-        sys.exit('Usage: dw add <minutes> <tag> "<description>"   (or just: dw add)')
+        sys.exit('Usage: dw add <minutes> <project> "<description>"   (or just: dw add)')
     if args:
         try:
             minutes = parse_minutes(args[0])
-            tag = check_tag(args[1])
+            project = check_project(args[1])
         except ValueError as e:
             sys.exit(str(e))
         description = " ".join(args[2:]).strip()
     else:
-        tags = recent_tags(records)
+        projects = recent_projects(records)
         minutes = ask("Duration (min)", parse_minutes)
-        if tags:
-            print("Tags:", ", ".join(tags[:10]))
-        tag = ask("Tag", check_tag, tags[0] if tags else "")
+        if projects:
+            print("Projects:", ", ".join(projects[:10]))
+        project = ask("Project", check_project, projects[0] if projects else "")
         description = input("Description: ").strip()
 
     if has_uncommitted_edits():
@@ -177,15 +177,15 @@ def cmd_add(args):
         "date": start.strftime("%Y-%m-%d"),
         "time": start.strftime("%H:%M"),
         "minutes": minutes,
-        "tag": tag,
+        "project": project,
         "description": description,
     }
     write_record(rec)
-    commit(f"Add {minutes} min {tag}: {description}".rstrip(": "))
+    commit(f"Add {minutes} min {project}: {description}".rstrip(": "))
 
     done = (sum(r["minutes"] for r in records) + minutes) / 60
     left = max(0, GOAL_HOURS - done)
-    print(f"Saved: {rec['date']} {rec['time']} | {minutes} min | {tag} | {description}")
+    print(f"Saved: {rec['date']} {rec['time']} | {minutes} min | {project} | {description}")
     print(f"Total: {done:,.1f} h done, {left:,.1f} h left to {GOAL_HOURS:,}")
 
 

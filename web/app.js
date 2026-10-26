@@ -88,8 +88,8 @@ document.addEventListener("pointerleave", hideTip);
 // ---------- Statistics ----------
 function computeStats(records, goalHours) {
   const byDay = new Map(); // "YYYY-MM-DD" -> { min, sessions }
-  const byTag = new Map(); // tag -> minutes
-  const tagOrder = [];     // tags in order of first use (keeps colors stable)
+  const byProject = new Map(); // project -> minutes
+  const projectOrder = [];     // projects in order of first use (keeps colors stable)
   let totalMin = 0;
   for (const r of records) {
     totalMin += r.minutes;
@@ -97,8 +97,8 @@ function computeStats(records, goalHours) {
     day.min += r.minutes;
     day.sessions += 1;
     byDay.set(r.date, day);
-    if (!byTag.has(r.tag)) tagOrder.push(r.tag);
-    byTag.set(r.tag, (byTag.get(r.tag) || 0) + r.minutes);
+    if (!byProject.has(r.project)) projectOrder.push(r.project);
+    byProject.set(r.project, (byProject.get(r.project) || 0) + r.minutes);
   }
 
   const now = today();
@@ -133,17 +133,17 @@ function computeStats(records, goalHours) {
   const doneHours = totalMin / 60;
   const leftHours = Math.max(0, goalHours - doneHours);
 
-  return { byDay, byTag, tagOrder, totalMin, weekMin, monthMin, longest, current,
+  return { byDay, byProject, projectOrder, totalMin, weekMin, monthMin, longest, current,
            paceDays, pacePerDay, doneHours, leftHours };
 }
 
-// Up to 8 tags get their own color; with more, the smaller ones fold into "Other".
-function tagColors(stats) {
-  const bySize = [...stats.byTag.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+// Up to 8 projects get their own color; with more, the smaller ones fold into "Other".
+function projectColors(stats) {
+  const bySize = [...stats.byProject.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   const shown = new Set(bySize.length > 8 ? bySize.slice(0, 7) : bySize);
   const colors = new Map();
   let slot = 1;
-  for (const t of stats.tagOrder) colors.set(t, shown.has(t) ? `var(--s${slot++})` : "var(--other)");
+  for (const t of stats.projectOrder) colors.set(t, shown.has(t) ? `var(--s${slot++})` : "var(--other)");
   return { colors, shown };
 }
 
@@ -298,19 +298,19 @@ function renderWeekly(records) {
   $("weekly").appendChild(svg);
 }
 
-function renderTags(stats) {
-  const box = $("tags");
-  if (!stats.byTag.size) { box.appendChild(htmlEl("p", { class: "empty" }, "No tags yet.")); return; }
+function renderProjects(stats) {
+  const box = $("projects");
+  if (!stats.byProject.size) { box.appendChild(htmlEl("p", { class: "empty" }, "No projects yet.")); return; }
 
-  const { colors, shown } = tagColors(stats);
-  const items = [...stats.byTag.entries()].filter(([t]) => shown.has(t))
-    .map(([tag, min]) => ({ tag, min, color: colors.get(tag) }))
+  const { colors, shown } = projectColors(stats);
+  const items = [...stats.byProject.entries()].filter(([t]) => shown.has(t))
+    .map(([project, min]) => ({ project, min, color: colors.get(project) }))
     .sort((a, b) => b.min - a.min);
-  const otherMin = [...stats.byTag.entries()].filter(([t]) => !shown.has(t)).reduce((s, [, m]) => s + m, 0);
-  if (otherMin > 0) items.push({ tag: "Other", min: otherMin, color: "var(--other)" });
+  const otherMin = [...stats.byProject.entries()].filter(([t]) => !shown.has(t)).reduce((s, [, m]) => s + m, 0);
+  if (otherMin > 0) items.push({ project: "Other", min: otherMin, color: "var(--other)" });
 
   const wrap = htmlEl("div", { class: "donut-svg" });
-  const svg = svgEl("svg", { viewBox: "0 0 200 200", role: "img", "aria-label": "Share of hours per tag" });
+  const svg = svgEl("svg", { viewBox: "0 0 200 200", role: "img", "aria-label": "Share of hours per project" });
   const r = 80;
   const gap = items.length > 1 ? (2 / (2 * Math.PI * r)) * 100 : 0; // 2px surface gap, in percent
   let offset = 0;
@@ -321,7 +321,7 @@ function renderTags(stats) {
       cx: 100, cy: 100, r, class: "seg", pathLength: 100, stroke: item.color,
       "stroke-dasharray": `${len} ${100 - len}`, "stroke-dashoffset": -offset,
       transform: "rotate(-90 100 100)", style: `--i:${i}`,
-      "data-tip": `${item.tag}\n${hours(item.min)} h · ${hoursFmt.format(share)}%`,
+      "data-tip": `${item.project}\n${hours(item.min)} h · ${hoursFmt.format(share)}%`,
     }, svg);
     offset += share;
   });
@@ -336,7 +336,7 @@ function renderTags(stats) {
   for (const item of items) {
     const li = htmlEl("li");
     li.appendChild(htmlEl("span", { class: "swatch", style: `background:${item.color}` }));
-    li.appendChild(htmlEl("span", {}, item.tag));
+    li.appendChild(htmlEl("span", {}, item.project));
     li.appendChild(htmlEl("span", { class: "num" }, `${hours(item.min)} h`));
     li.appendChild(htmlEl("span", { class: "num" }, `${intFmt.format((item.min / stats.totalMin) * 100)}%`));
     legend.appendChild(li);
@@ -412,20 +412,20 @@ function renderCumulative(stats, records) {
 function renderRecent(stats, records) {
   const box = $("recent");
   if (!records.length) { box.appendChild(htmlEl("p", { class: "empty" }, "No sessions yet.")); return; }
-  const { colors } = tagColors(stats);
+  const { colors } = projectColors(stats);
   const table = htmlEl("table");
   const head = htmlEl("tr");
-  ["Date", "Time", "Minutes", "Tag", "Description"].forEach(h => head.appendChild(htmlEl("th", {}, h)));
+  ["Date", "Time", "Minutes", "Project", "Description"].forEach(h => head.appendChild(htmlEl("th", {}, h)));
   table.appendChild(head);
   for (const r of records.slice(-10).reverse()) {
     const tr = htmlEl("tr");
     tr.appendChild(htmlEl("td", { class: "num" }, longDay(parseDate(r.date))));
     tr.appendChild(htmlEl("td", { class: "num" }, r.time));
     tr.appendChild(htmlEl("td", { class: "num" }, String(r.minutes)));
-    const tag = htmlEl("td");
-    tag.appendChild(htmlEl("span", { class: "swatch", style: `background:${colors.get(r.tag)}` }));
-    tag.appendChild(document.createTextNode(r.tag));
-    tr.appendChild(tag);
+    const project = htmlEl("td");
+    project.appendChild(htmlEl("span", { class: "swatch", style: `background:${colors.get(r.project)}` }));
+    project.appendChild(document.createTextNode(r.project));
+    tr.appendChild(project);
     tr.appendChild(htmlEl("td", {}, r.description));
     table.appendChild(tr);
   }
@@ -453,7 +453,7 @@ function main() {
   renderTiles(stats);
   renderHeatmap(stats);
   renderWeekly(records);
-  renderTags(stats);
+  renderProjects(stats);
   renderCumulative(stats, records);
   renderRecent(stats, records);
 }
