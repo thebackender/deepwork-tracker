@@ -6,6 +6,7 @@ Usage:
   dw add 90 thesis "Wrote intro"   add a record in one line
   dw stats                         open the statistics page in the browser
   dw sync                          update the public file from the private log
+  dw backup                        back up all records now (.md + .xlsx)
 
 Two log files:
   deepwork_logs.md         private, full records. Ignored by git, backed up automatically.
@@ -17,8 +18,9 @@ updates the public file. Commit and push deepwork_logs.public.md yourself.
 
 Backup: when the first record of a new day is added, the private log (every record
 from the start up to the last logged day) is copied to
-<DW_BACKUP_DIR>/deepwork_logs-YYYY-MM.md, one read-only file per month.
-Set DW_BACKUP_DIR in .env (see .env.example); default ~/deepwork-backup.
+<DW_BACKUP_DIR>/deepwork_logs-YYYY-MM.md, one read-only file per month, plus an Excel copy
+with the same name in <DW_XLSX_BACKUP_DIR>. Set both in .env (see .env.example);
+default ~/deepwork-backup for both.
 """
 import json
 import os
@@ -30,6 +32,8 @@ import webbrowser
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import xlsx_backup
 
 ROOT = Path(__file__).resolve().parent
 LOG_FILE = ROOT / "deepwork_logs.md"            # private: never committed
@@ -57,6 +61,7 @@ def read_env(path):
 # Settings come from the environment first, then .env, then the default.
 ENV = {**read_env(ROOT / ".env"), **os.environ}
 BACKUP_DIR = Path(ENV.get("DW_BACKUP_DIR") or Path.home() / "deepwork-backup").expanduser()
+XLSX_BACKUP_DIR = Path(ENV.get("DW_XLSX_BACKUP_DIR") or BACKUP_DIR).expanduser()
 
 
 # --- File format --------------------------------------------------------------
@@ -84,9 +89,13 @@ def read_records():
     """Return all records from the private log, oldest first. Unreadable rows are reported and skipped."""
     if not LOG_FILE.exists():
         return []
+    return parse_records(LOG_FILE.read_text(encoding="utf-8"))
+
+
+def parse_records(text, report=True):
+    """Return the records in the log's text, oldest first."""
     records = []
-    lines = LOG_FILE.read_text(encoding="utf-8").splitlines()
-    for num, line in enumerate(lines, 1):
+    for num, line in enumerate(text.splitlines(), 1):
         line = line.strip()
         if not line.startswith("|"):
             continue
@@ -103,7 +112,8 @@ def read_records():
             if minutes <= 0:
                 raise ValueError
         except ValueError:
-            print(f"Skipping line {num} of {LOG_FILE.name}, can't read it: {line}", file=sys.stderr)
+            if report:
+                print(f"Skipping line {num} of {LOG_FILE.name}, can't read it: {line}", file=sys.stderr)
             continue
         records.append({
             "date": date,
@@ -222,28 +232,49 @@ def confirm_matches_public(records):
 # every record from the start up to the last logged day, so the backup never
 # contains today's (possibly unfinished) day. The file is named after the month of
 # its latest record: the current month's file is replaced on each new day, and once
-# the month is over its file stays final. Files are read-only and the folder is locked,
-# so backups can't be edited or deleted by accident.
+# the month is over its file stays final. Each backup also gets an Excel copy with the same
+# name (see xlsx_backup.py). Files are read-only and the folders are locked, so backups
+# can't be edited or deleted by accident.
 
-def backup(latest_date):
-    """Copy the private log to BACKUP_DIR/deepwork_logs-YYYY-MM.md. Reports errors instead of raising."""
-    path = BACKUP_DIR / f"deepwork_logs-{latest_date[:7]}.md"
+def save_locked(folder, name, data):
+    """Write data to folder/name as a read-only file, unlocking the folder only while saving."""
+    path = folder / name
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(DIR_UNLOCKED)
     try:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        BACKUP_DIR.chmod(DIR_UNLOCKED)  # unlock the folder only while saving
-        try:
+        if path.exists():
+            path.chmod(WRITABLE)  # unlock to replace it
+        path.write_bytes(data)
+        path.chmod(READ_ONLY)
+        if path.read_bytes() != data:
+            raise OSError(f"{path} doesn't match what was written")
+    finally:
+        folder.chmod(DIR_LOCKED)
+    return path
+
+
+def backup(latest_date, data=None):
+    """Save the private log (or the given bytes) as deepwork_logs-YYYY-MM.md, plus an Excel copy
+    with the same name. Returns True if the .md backup was saved.
+
+    Reports errors instead of raising, so a failed backup never stops `dw add`.
+    """
+    name = f"deepwork_logs-{latest_date[:7]}"
+    try:
+        if data is None:
             data = LOG_FILE.read_bytes()
-            if path.exists():
-                path.chmod(WRITABLE)  # unlock to replace it
-            path.write_bytes(data)
-            path.chmod(READ_ONLY)
-            if path.read_bytes() != data:
-                raise OSError(f"{path} doesn't match the log after copying")
-        finally:
-            BACKUP_DIR.chmod(DIR_LOCKED)
+        path = save_locked(BACKUP_DIR, name + ".md", data)
         print(f"Backup: {path} (records up to {latest_date})")
     except OSError as e:
         print(f"Backup failed: {e}")
+        return False
+    try:
+        records = parse_records(data.decode("utf-8"), report=False)
+        path = save_locked(XLSX_BACKUP_DIR, name + ".xlsx", xlsx_backup.records_to_xlsx(records))
+        print(f"Backup: {path}")
+    except Exception as e:  # the .md backup above is what matters; never stop dw add here
+        print(f"Excel backup failed: {e}")
+    return True
 
 
 # --- Commands -------------------------------------------------------------------
@@ -365,6 +396,18 @@ def cmd_sync():
         print(f"{PUBLIC_FILE.name} is already up to date ({len(records)} records).")
 
 
+def cmd_backup():
+    records = read_records()
+    if not confirm_matches_public(records):
+        sys.exit(f"No backup made. Fix {LOG_FILE.name} or restore it from a backup, then try again.")
+    sync_public(records)
+    if not records:
+        print("Nothing to back up yet.")
+        return
+    if not backup(records[-1]["date"]):  # whole log, named after the newest record's month
+        sys.exit(1)
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help", "help"):
@@ -377,6 +420,8 @@ def main():
         cmd_stats()
     elif command == "sync":
         cmd_sync()
+    elif command == "backup":
+        cmd_backup()
     else:
         sys.exit(f"Unknown command: {command}\n{__doc__}")
 
