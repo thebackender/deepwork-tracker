@@ -22,7 +22,7 @@ The time is the session's **start** time: `dw add 90 …` at 11:00 records `09:3
 - Only write to `deepwork_logs.md`, either through `dw add` or by editing it by hand.
 - `dw add` and `dw stats` regenerate the public file, including your manual edits. `dw` never commits: commit `deepwork_logs.public.md` yourself (VS Code's Source Control panel or `git commit`), then push.
 - Commit times are visible on GitHub. To hide when you work, commit at a different time than your sessions, e.g. once a day or once a week.
-- `deepwork_logs.public.md` is **read-only**, so it can't be edited by hand. `dw` unlocks it only while regenerating it. Git can still commit, discard or check it out, and the next `dw` run locks it again.
+- `deepwork_logs.public.md` is **read-only**, so it can't be edited by hand. `dw` unlocks it only while regenerating it. Git can still commit, discard or check it out, and the next `dw` run locks it again. In VS Code, `.vscode/settings.json` also opens it in a read-only editor, so VS Code's "Overwrite" save option can't bypass the lock.
 
 ## Backups
 
