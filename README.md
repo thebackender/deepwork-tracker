@@ -22,7 +22,7 @@ The time is the session's **start** time: `dw add 90 …` at 11:00 records `09:3
 - Only write to `deepwork_logs.md`, either through `dw add` or by editing it by hand.
 - `dw add` and `dw stats` regenerate the public file, including your manual edits. `dw` never commits: commit `deepwork_logs.public.md` yourself (VS Code's Source Control panel or `git commit`), then push.
 - Commit times are visible on GitHub. To hide when you work, commit at a different time than your sessions, e.g. once a day or once a week.
-- Never edit `deepwork_logs.public.md` by hand, because it gets overwritten.
+- `deepwork_logs.public.md` is **read-only**, so it can't be edited by hand. `dw` unlocks it only while regenerating it. Git can still commit, discard or check it out, and the next `dw` run locks it again.
 
 ## Backups
 
@@ -35,7 +35,7 @@ When you add the **first record of a new day**, `dw add` first copies `deepwork_
 ```
 
 - **One file per month**, named after the month of its newest record. The current month's file is replaced each new day. Once the next month starts, the previous file stays as it is for good.
-- **Read-only:** backup files can't be edited or saved by accident. Only `dw add` replaces the current month's file.
+- **Locked:** backup files are read-only and the backup folder is locked, so backups can't be edited, renamed or deleted, not even with `rm -rf`. Only `dw add` unlocks them for the moment it saves a backup. To delete backups on purpose, unlock the folder first: `chmod u+w <backup folder>`.
 - **Restore:** copy a backup file back to `deepwork_logs.md` (the copy will be read-only too, so make it writable again, e.g. `chmod u+w deepwork_logs.md`).
 - **Location:** set `DW_BACKUP_DIR` in `.env` (copy `.env.example` to `.env`). Without it, backups go to `~/deepwork-backup`. `.env` is ignored by git, so your path stays private.
 - Backups stay on this computer. `deepwork_logs.public.md` on GitHub also holds every date and duration.

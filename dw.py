@@ -34,6 +34,10 @@ LOG_FILE = ROOT / "deepwork_logs.md"            # private: never committed
 PUBLIC_FILE = ROOT / "deepwork_logs.public.md"  # public: generated, you commit it
 WEB_DIR = ROOT / "web"
 GOAL_HOURS = 10_000
+READ_ONLY = stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH
+WRITABLE = stat.S_IREAD | stat.S_IWRITE | stat.S_IRGRP | stat.S_IROTH
+DIR_LOCKED = 0o555    # folder: files inside can't be created, renamed or deleted
+DIR_UNLOCKED = 0o755
 
 
 def read_env(path):
@@ -124,14 +128,17 @@ def write_record(rec):
 
 
 def write_public(records):
-    """Regenerate the public file from records. Returns True if its content changed."""
+    """Regenerate the public file from records and keep it read-only. Returns True if it changed."""
     text = PUBLIC_HEADER + "".join(f"| {r['date']} | {r['minutes']} |\n" for r in records)
     old = PUBLIC_FILE.read_text(encoding="utf-8") if PUBLIC_FILE.exists() else None
-    if text == old:
-        return False
-    with PUBLIC_FILE.open("w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    return True
+    changed = text != old
+    if changed:
+        if PUBLIC_FILE.exists():
+            PUBLIC_FILE.chmod(WRITABLE)  # unlock to replace it
+        with PUBLIC_FILE.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    PUBLIC_FILE.chmod(READ_ONLY)  # also re-locks it after e.g. a git checkout
+    return changed
 
 
 # --- Public file ----------------------------------------------------------------
@@ -162,23 +169,25 @@ def sync_public(records):
 # every record from the start up to the last logged day, so the backup never
 # contains today's (possibly unfinished) day. The file is named after the month of
 # its latest record: the current month's file is replaced on each new day, and once
-# the month is over its file stays final. Files are read-only to prevent accidental edits.
-
-READ_ONLY = stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH
-
+# the month is over its file stays final. Files are read-only and the folder is locked,
+# so backups can't be edited or deleted by accident.
 
 def backup(latest_date):
     """Copy the private log to BACKUP_DIR/deepwork_logs-YYYY-MM.md. Reports errors instead of raising."""
     path = BACKUP_DIR / f"deepwork_logs-{latest_date[:7]}.md"
     try:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        data = LOG_FILE.read_bytes()
-        if path.exists():
-            path.chmod(stat.S_IREAD | stat.S_IWRITE)  # unlock to replace it
-        path.write_bytes(data)
-        path.chmod(READ_ONLY)
-        if path.read_bytes() != data:
-            raise OSError(f"{path} doesn't match the log after copying")
+        BACKUP_DIR.chmod(DIR_UNLOCKED)  # unlock the folder only while saving
+        try:
+            data = LOG_FILE.read_bytes()
+            if path.exists():
+                path.chmod(WRITABLE)  # unlock to replace it
+            path.write_bytes(data)
+            path.chmod(READ_ONLY)
+            if path.read_bytes() != data:
+                raise OSError(f"{path} doesn't match the log after copying")
+        finally:
+            BACKUP_DIR.chmod(DIR_LOCKED)
         print(f"Backup: {path} (records up to {latest_date})")
     except OSError as e:
         print(f"Backup failed: {e}")
