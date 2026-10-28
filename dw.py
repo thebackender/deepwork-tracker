@@ -7,16 +7,22 @@ Usage:
   dw stats                         open the statistics page in the browser
 
 Two log files:
-  deepwork_logs.md         private, full records. Ignored by git; back it up yourself.
-  deepwork_logs.public.md  date + duration only. Generated from deepwork_logs.md and committed.
+  deepwork_logs.md         private, full records. Ignored by git, backed up automatically.
+  deepwork_logs.public.md  date + duration only. Generated from deepwork_logs.md; you commit it.
 
 A record's time is the session's start time (now minus the duration).
 To fix past records, edit deepwork_logs.md by hand; the next `dw add` or `dw stats`
-updates and commits the public file.
+updates the public file. Commit and push deepwork_logs.public.md yourself.
+
+Backup: when the first record of a new day is added, the private log (every record
+from the start up to the last logged day) is copied to
+<DW_BACKUP_DIR>/deepwork_logs-YYYY-MM.md, one read-only file per month.
+Set DW_BACKUP_DIR in .env (see .env.example); default ~/deepwork-backup.
 """
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import webbrowser
@@ -25,9 +31,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 LOG_FILE = ROOT / "deepwork_logs.md"            # private: never committed
-PUBLIC_FILE = ROOT / "deepwork_logs.public.md"  # public: generated, committed
+PUBLIC_FILE = ROOT / "deepwork_logs.public.md"  # public: generated, you commit it
 WEB_DIR = ROOT / "web"
 GOAL_HOURS = 10_000
+
+
+def read_env(path):
+    """Read KEY=VALUE lines from a .env file. Blank lines and # comments are ignored."""
+    values = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip().strip("\"'")
+    return values
+
+
+# Settings come from the environment first, then .env, then the default.
+ENV = {**read_env(ROOT / ".env"), **os.environ}
+BACKUP_DIR = Path(ENV.get("DW_BACKUP_DIR") or Path.home() / "deepwork-backup").expanduser()
 
 
 # --- File format --------------------------------------------------------------
@@ -111,43 +134,54 @@ def write_public(records):
     return True
 
 
-# --- Git (only the public file is ever committed) --------------------------------
+# --- Public file ----------------------------------------------------------------
+# dw only writes the public file. Committing and pushing it is up to you.
 
-def git(*args, env=None):
-    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, env=env)
-
-
-def has_uncommitted_public_changes():
+def warn_if_private_tracked():
+    """Warn if the private log was ever added to git, since it could get published."""
     try:
-        result = git("status", "--porcelain", "--", PUBLIC_FILE.name)
+        result = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", LOG_FILE.name],
+                                capture_output=True, text=True)
     except FileNotFoundError:
-        return False
-    return result.returncode == 0 and bool(result.stdout.strip())
-
-
-def commit(message, date):
-    """Commit the public file, dated at midnight UTC so the commit doesn't reveal the time of day."""
-    stamp = f"{date}T00:00:00+00:00"
-    env = {**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
-    try:
-        if git("ls-files", "--error-unmatch", LOG_FILE.name).returncode == 0:
-            print(f"WARNING: {LOG_FILE.name} is tracked by git, so your private log may get published. "
-                  f"Remove it with: git rm --cached {LOG_FILE.name}")
-        git("add", "--", PUBLIC_FILE.name)
-        result = git("commit", "-m", message, "--", PUBLIC_FILE.name, env=env)
-    except FileNotFoundError:
-        print("git is not installed, so the change was saved but not committed.")
-        return
-    if result.returncode != 0:
-        print("git commit failed:", (result.stderr or result.stdout).strip())
+        return  # git not installed
+    if result.returncode == 0:
+        print(f"WARNING: {LOG_FILE.name} is tracked by git, so your private log may get published. "
+              f"Remove it with: git rm --cached {LOG_FILE.name}")
 
 
 def sync_public(records):
-    """Bring the public file in line with the private log (e.g. after manual edits) and commit it."""
+    """Regenerate the public file from the private log (e.g. after manual edits)."""
     if not records and not PUBLIC_FILE.exists():
         return  # nothing logged yet
-    if write_public(records) or has_uncommitted_public_changes():
-        commit("Update from manual edits", datetime.now().strftime("%Y-%m-%d"))
+    write_public(records)
+    warn_if_private_tracked()
+
+
+# --- Monthly backup of the private log -----------------------------------------
+# Taken when the first record of a new day is added. At that moment the log holds
+# every record from the start up to the last logged day, so the backup never
+# contains today's (possibly unfinished) day. The file is named after the month of
+# its latest record: the current month's file is replaced on each new day, and once
+# the month is over its file stays final. Files are read-only to prevent accidental edits.
+
+READ_ONLY = stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH
+
+
+def backup(latest_date):
+    """Copy the private log to BACKUP_DIR/deepwork_logs-YYYY-MM.md. Reports errors instead of raising."""
+    path = BACKUP_DIR / f"deepwork_logs-{latest_date[:7]}.md"
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        data = LOG_FILE.read_bytes()
+        if path.exists():
+            path.chmod(stat.S_IREAD | stat.S_IWRITE)  # unlock to replace it
+        path.write_bytes(data)
+        path.chmod(READ_ONLY)
+        if path.read_bytes() != data:
+            raise OSError(f"{path} doesn't match the log after copying")
+        print(f"Backup: {path} (records up to {latest_date})")
+    except OSError as e:
+        print(f"Backup failed: {e}")
 
 
 # --- Commands -------------------------------------------------------------------
@@ -207,8 +241,6 @@ def cmd_add(args):
         project = ask("Project", check_project, projects[0] if projects else "")
         description = input("Description: ").strip()
 
-    sync_public(records)  # commit manual edits separately, before the new record
-
     start = datetime.now() - timedelta(minutes=minutes)
     rec = {
         "date": start.strftime("%Y-%m-%d"),
@@ -217,9 +249,11 @@ def cmd_add(args):
         "project": project,
         "description": description,
     }
+    latest_date = max((r["date"] for r in records), default=None)
+    if latest_date and rec["date"] > latest_date:
+        backup(latest_date)  # first record of a new day: save everything before it
     write_record(rec)
-    write_public(read_records())
-    commit(f"Add {minutes} min", rec["date"])
+    sync_public(read_records())
 
     done = (sum(r["minutes"] for r in records) + minutes) / 60
     left = max(0, GOAL_HOURS - done)
