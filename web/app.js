@@ -372,11 +372,15 @@ function renderCumulative(stats, records) {
     svgEl("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = intFmt.format(v);
   }
   svgEl("text", { x: m.l - 6, y: y(0) + 4, "text-anchor": "end" }, svg).textContent = "0";
+  // Over a year of data: show month and year, otherwise day and month.
+  const tickLabel = points.length > 366
+    ? d => d.toLocaleDateString(undefined, { month: "short", year: "numeric" })
+    : shortDay;
   const ticks = Math.min(5, points.length - 1);
   for (let t = 0; t <= ticks; t++) {
     const i = Math.round((t / ticks) * (points.length - 1));
     svgEl("text", { x: x(i), y: H - 6, "text-anchor": t === 0 ? "start" : t === ticks ? "end" : "middle" }, svg)
-      .textContent = shortDay(points[i].date);
+      .textContent = tickLabel(points[i].date);
   }
 
   const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join("");
