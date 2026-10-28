@@ -5,6 +5,7 @@ Usage:
   dw add                           ask for each field
   dw add 90 thesis "Wrote intro"   add a record in one line
   dw stats                         open the statistics page in the browser
+  dw sync                          update the public file from the private log
 
 Two log files:
   deepwork_logs.md         private, full records. Ignored by git, backed up automatically.
@@ -26,6 +27,7 @@ import stat
 import subprocess
 import sys
 import webbrowser
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -141,6 +143,18 @@ def write_public(records):
     return changed
 
 
+def read_public():
+    """Return (date, minutes) pairs from the public file, or None if it doesn't exist."""
+    if not PUBLIC_FILE.exists():
+        return None
+    pairs = []
+    for line in PUBLIC_FILE.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d+)\s*\|", line.strip())
+        if m:
+            pairs.append((m[1], int(m[2])))
+    return pairs
+
+
 # --- Public file ----------------------------------------------------------------
 # dw only writes the public file. Committing and pushing it is up to you.
 
@@ -162,6 +176,45 @@ def sync_public(records):
         return  # nothing logged yet
     write_public(records)
     warn_if_private_tracked()
+
+
+def find_mismatches(records):
+    """Compare past records with the public file.
+
+    Returns (missing, extra): (date, minutes) pairs that are in the public file but not
+    in the private log, and the other way round. Records dated after the newest public
+    date are new and not compared.
+    """
+    public = read_public()
+    if not public:
+        return [], []
+    newest = max(date for date, _ in public)
+    mine = Counter((r["date"], r["minutes"]) for r in records if r["date"] <= newest)
+    theirs = Counter(public)
+    return sorted((theirs - mine).elements()), sorted((mine - theirs).elements())
+
+
+def confirm_matches_public(records):
+    """Return True if the private log may update the public file.
+
+    If past records differ from the public file, show the differences and ask.
+    Without a terminal to ask in, the answer is no.
+    """
+    missing, extra = find_mismatches(records)
+    if not missing and not extra:
+        return True
+    print(f"WARNING: past records in {LOG_FILE.name} don't match {PUBLIC_FILE.name}:")
+    for sign, rows, note in (("-", missing, "in public log, not in your log"),
+                             ("+", extra, "in your log, not in public log")):
+        for date, minutes in rows[:10]:
+            print(f"  {sign} {date} | {minutes} min   ({note})")
+        if len(rows) > 10:
+            print(f"  {sign} ... and {len(rows) - 10} more")
+    print(f"If this is a mistake, restore {LOG_FILE.name} from your backups in {BACKUP_DIR}")
+    if not sys.stdin.isatty():
+        return False
+    answer = input("Did you change these on purpose? Update the public log [y/N]: ")
+    return answer.strip().lower() in ("y", "yes")
 
 
 # --- Monthly backup of the private log -----------------------------------------
@@ -232,9 +285,12 @@ def ask(prompt, check, default=""):
 
 
 def cmd_add(args):
-    records = read_records()
     if args and len(args) < 3:
         sys.exit('Usage: dw add <minutes> <project> "<description>"   (or just: dw add)')
+    records = read_records()
+    if not confirm_matches_public(records):
+        sys.exit(f"Nothing saved. Fix {LOG_FILE.name} or restore it from a backup, then try again.")
+    sync_public(records)  # take in any accepted changes
     if args:
         try:
             minutes = parse_minutes(args[0])
@@ -284,11 +340,29 @@ def write_data_js(records):
 
 def cmd_stats():
     records = read_records()
-    sync_public(records)
+    if confirm_matches_public(records):
+        sync_public(records)
+    else:
+        print(f"{PUBLIC_FILE.name} was not updated.")
     write_data_js(records)
     page = WEB_DIR / "index.html"
     webbrowser.open(page.as_uri())
     print(f"Opened {page} ({len(records)} records)")
+
+
+def cmd_sync():
+    records = read_records()
+    if not records and not PUBLIC_FILE.exists():
+        print("Nothing to sync yet.")
+        return
+    if not confirm_matches_public(records):
+        sys.exit(f"{PUBLIC_FILE.name} was not updated.")
+    changed = write_public(records)
+    warn_if_private_tracked()
+    if changed:
+        print(f"{PUBLIC_FILE.name} updated ({len(records)} records).")
+    else:
+        print(f"{PUBLIC_FILE.name} is already up to date ({len(records)} records).")
 
 
 def main():
@@ -301,6 +375,8 @@ def main():
         cmd_add(rest)
     elif command == "stats":
         cmd_stats()
+    elif command == "sync":
+        cmd_sync()
     else:
         sys.exit(f"Unknown command: {command}\n{__doc__}")
 
