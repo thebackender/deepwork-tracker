@@ -2,6 +2,8 @@
 1. Have plan of what to do within session
 2. Airplane mode, timer on, session started
 3. 3-5 minute mobility exercises in between sessions
+   - If I did them after the session, add `[mob]` to its description:
+     `dw add 90 thesis "Drafted chapter 2 [mob]"`
 4. Eat the frog, finish priority tasks first, Pareto 80/20 
 ### DOESN'T COUNT:
 - passive monitoring, checking emails, statistics
