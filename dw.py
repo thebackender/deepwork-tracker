@@ -15,7 +15,8 @@ Backup: when the first record of a new day is added, the log (every record
 from the start up to the last logged day) is copied to
 <DW_BACKUP_DIR>/deepwork_logs-YYYY-MM.md, one read-only file per month, plus an Excel copy
 with the same name in <DW_XLSX_BACKUP_DIR>. Set both in .env (see .env.example);
-default ~/deepwork-backup for both.
+default ~/deepwork-backup for both. The log itself lives at <DW_LOG_FILE>
+(default: deepwork_logs.md next to dw.py).
 """
 import json
 import os
@@ -29,7 +30,6 @@ from pathlib import Path
 import xlsx_backup
 
 ROOT = Path(__file__).resolve().parent
-LOG_FILE = ROOT / "deepwork_logs.md"
 WEB_DIR = ROOT / "web"
 GOAL_HOURS = 10_000
 READ_ONLY = stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH
@@ -54,6 +54,7 @@ def read_env(path):
 ENV = {**read_env(ROOT / ".env"), **os.environ}
 BACKUP_DIR = Path(ENV.get("DW_BACKUP_DIR") or Path.home() / "deepwork-backup").expanduser()
 XLSX_BACKUP_DIR = Path(ENV.get("DW_XLSX_BACKUP_DIR") or BACKUP_DIR).expanduser()
+LOG_FILE = Path(ENV.get("DW_LOG_FILE") or ROOT / "deepwork_logs.md").expanduser()
 
 
 # --- File format --------------------------------------------------------------

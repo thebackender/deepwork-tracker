@@ -32,7 +32,7 @@ When you add the **first record of a new day**, `dw add` first copies `deepwork_
 - **Locked:** backup files are read-only and the backup folder is locked, so backups can't be edited, renamed or deleted, not even with `rm -rf`. Only `dw add` unlocks them for the moment it saves a backup. To delete backups on purpose, unlock the folder first: `chmod u+w <backup folder>`.
 - **Restore:** copy a backup file back: `cp <backup file> deepwork_logs.md`, then make it editable again: `chmod u+w deepwork_logs.md`.
 - **Excel copy:** each backup is also saved as an Excel file with the same name, e.g. `deepwork_logs-2026-10.xlsx`, with one row per record (Date, Time, Duration, Project, Description). It opens in Excel, LibreOffice and Google Sheets, works with any language and is read-only and locked the same way.
-- **Location:** set `DW_BACKUP_DIR` (and `DW_XLSX_BACKUP_DIR` for the Excel copies) in `.env` (copy `.env.example` to `.env`). Without them, both go to `~/deepwork-backup`. `.env` is ignored by git, so your path stays private.
+- **Location:** set `DW_BACKUP_DIR` (and `DW_XLSX_BACKUP_DIR` for the Excel copies) in `.env` (copy `.env.example` to `.env`). Without them, both go to `~/deepwork-backup`. Set `DW_LOG_FILE` to keep the log itself somewhere else (default: `deepwork_logs.md` next to `dw.py`). `.env` is ignored by git, so your path stays private.
 - Backups stay on this computer.
 
 ## Setup
