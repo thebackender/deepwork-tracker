@@ -18,7 +18,7 @@ The time is the session's **start** time: `dw add 90 …` at 11:00 records `09:3
 Needs Python 3.8+.
 
 1. Add an alias to `~/.bashrc` or `~/.zshrc`: `alias dw="python3 /path/to/deepwork-tracker/dw.py"`. On Windows, add the project folder to `PATH` and `dw.bat` does the rest.
-2. Copy `.env.example` to `.env` and set the paths to the log and backup folders. `.env` is ignored by git.
+2. Copy `.env.example` to `.env` and set the paths to the log and backup folders. Relative paths count from this folder, so `dw` works the same from anywhere. `.env` is ignored by git.
 
 Suggested layout: only the code is shared, the log and backups stay on this computer.
 
@@ -39,14 +39,14 @@ chmod +x deepwork-logs/.git/hooks/pre-push
 
 ## The log
 
-`deepwork_logs.md` holds every record and is the only source of truth. Write to it with `dw add`, or edit it by hand to fix past records. It lives at `DW_LOG_FILE` (default: next to `dw.py`, ignored by git). If you move it, update `.env`: when there's no log at that path, `dw add` starts a new, empty one.
+`deepwork_logs.md` holds every record and is the only source of truth. Write to it with `dw add`, or edit it by hand to fix past records. It lives at `DW_LOG_FILE` (default: next to `dw.py`, ignored by git). If you move it, update `.env`. When there's no log at that path, `dw add` asks before starting a new one, and `dw stats` / `dw backup` stop with an error, so a typo in the path can't split your records.
 
 ## Backups
 
 The first `dw add` of a new day copies the log to `DW_BACKUP_DIR/deepwork_logs-YYYY-MM.md`, plus an Excel copy in `DW_XLSX_BACKUP_DIR` (default for both: `~/deepwork-backup`). `dw backup` does the same on demand, including today's records.
 
 - **One file per month.** The current month's file is replaced each day; past months stay final.
-- **Locked.** Backup files are read-only and their folder is locked, so they can't be edited or deleted, even with `rm -rf`. To delete them on purpose: `chmod u+w <backup folder>`. Git can commit locked folders but can't pull or check out into them.
+- **Locked.** Backup files are read-only and their folder is locked, so they can't be edited or deleted, even with `rm -rf`. Each backup folder must hold only backups; otherwise `dw` refuses to lock it. A failed save never overwrites the previous backup. To delete backups on purpose: `chmod u+w <backup folder>`. Git can commit locked folders but can't pull or check out into them.
 - **Restore:** `cp <backup file> <log file> && chmod u+w <log file>`.
 
 ## Files

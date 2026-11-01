@@ -34,8 +34,8 @@ WEB_DIR = ROOT / "web"
 GOAL_HOURS = 10_000
 READ_ONLY = stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH
 WRITABLE = stat.S_IREAD | stat.S_IWRITE | stat.S_IRGRP | stat.S_IROTH
-DIR_LOCKED = 0o555    # folder: files inside can't be created, renamed or deleted
-DIR_UNLOCKED = 0o755
+NO_WRITE = 0o222      # write bits: without them, files in a folder can't be created, renamed or deleted
+BACKUP_NAME = re.compile(r"deepwork_logs-\d{4}-\d{2}\.(md|xlsx)(\.tmp)?")  # .tmp: left by an interrupted save
 
 
 def read_env(path):
@@ -50,11 +50,20 @@ def read_env(path):
     return values
 
 
+def setting_path(name, default):
+    """Path from a setting. ~ and $VARS are expanded; relative paths count from this folder,
+    so dw works the same from any current directory."""
+    value = ENV.get(name)
+    if not value:
+        return Path(default)
+    return ROOT / Path(os.path.expandvars(value)).expanduser()  # ROOT / absolute = absolute
+
+
 # Settings come from the environment first, then .env, then the default.
 ENV = {**read_env(ROOT / ".env"), **os.environ}
-BACKUP_DIR = Path(ENV.get("DW_BACKUP_DIR") or Path.home() / "deepwork-backup").expanduser()
-XLSX_BACKUP_DIR = Path(ENV.get("DW_XLSX_BACKUP_DIR") or BACKUP_DIR).expanduser()
-LOG_FILE = Path(ENV.get("DW_LOG_FILE") or ROOT / "deepwork_logs.md").expanduser()
+BACKUP_DIR = setting_path("DW_BACKUP_DIR", Path.home() / "deepwork-backup")
+XLSX_BACKUP_DIR = setting_path("DW_XLSX_BACKUP_DIR", BACKUP_DIR)
+LOG_FILE = setting_path("DW_LOG_FILE", ROOT / "deepwork_logs.md")
 
 
 # --- File format --------------------------------------------------------------
@@ -111,6 +120,11 @@ def parse_records(text, report=True):
     return records
 
 
+def one_line(text):
+    """Collapse newlines, tabs and repeated spaces: a record must stay on one table row."""
+    return " ".join(text.split())
+
+
 def write_record(rec):
     """Append one record to the log, creating the file with a header if needed."""
     text = LOG_FILE.read_text(encoding="utf-8") if LOG_FILE.exists() else ""
@@ -134,19 +148,35 @@ def write_record(rec):
 # can't be edited or deleted by accident.
 
 def save_locked(folder, name, data):
-    """Write data to folder/name as a read-only file, unlocking the folder only while saving."""
+    """Write data to folder/name as a read-only file, unlocking the folder only while saving.
+
+    The folder must hold nothing but backups, because it gets locked as a whole.
+    The new file is written next to the old one and then swapped in, so a failed
+    write (e.g. a full disk) leaves the previous backup intact.
+    """
     path = folder / name
     folder.mkdir(parents=True, exist_ok=True)
-    folder.chmod(DIR_UNLOCKED)
+    others = [f.name for f in folder.iterdir()
+              if not BACKUP_NAME.fullmatch(f.name) and not f.name.startswith(".")]  # .git is fine
+    if others:
+        raise OSError(f"{folder} holds other files too ({', '.join(sorted(others)[:3])}), "
+                      "so it won't be locked. Point the backup setting in .env to a folder of its own.")
+    locked_mode = stat.S_IMODE(folder.stat().st_mode) & ~NO_WRITE
+    folder.chmod(locked_mode | stat.S_IWUSR)
+    tmp = folder / (name + ".tmp")
     try:
+        tmp.write_bytes(data)
+        if tmp.read_bytes() != data:
+            raise OSError(f"{tmp} doesn't match what was written")
+        tmp.chmod(READ_ONLY)
         if path.exists():
-            path.chmod(WRITABLE)  # unlock to replace it
-        path.write_bytes(data)
-        path.chmod(READ_ONLY)
-        if path.read_bytes() != data:
-            raise OSError(f"{path} doesn't match what was written")
+            path.chmod(WRITABLE)  # some systems refuse to replace a read-only file
+        os.replace(tmp, path)
     finally:
-        folder.chmod(DIR_LOCKED)
+        if tmp.exists():
+            tmp.chmod(WRITABLE)
+            tmp.unlink()
+        folder.chmod(locked_mode)
     return path
 
 
@@ -185,8 +215,23 @@ def parse_minutes(text):
     return minutes
 
 
+def check_log_file(creating):
+    """Make sure LOG_FILE is where the settings say. A missing log usually means a wrong
+    path in .env, so `dw add` asks before starting a new one and other commands stop."""
+    if LOG_FILE.exists():
+        return
+    hint = "Check DW_LOG_FILE in .env." if ENV.get("DW_LOG_FILE") else "Set DW_LOG_FILE in .env if it lives elsewhere."
+    if not LOG_FILE.parent.is_dir():
+        sys.exit(f"Log folder doesn't exist: {LOG_FILE.parent}\n{hint}")
+    if not creating:
+        sys.exit(f"No log at {LOG_FILE}\n{hint}")
+    print(f"No log at {LOG_FILE}\n{hint}")
+    if input("Start a new, empty log there? [y/N]: ").strip().lower() not in ("y", "yes"):
+        sys.exit("Nothing saved.")
+
+
 def check_project(text):
-    project = text.strip()
+    project = one_line(text)
     if not project or "|" in project:
         raise ValueError("Project can't be empty or contain |")
     return project
@@ -214,6 +259,7 @@ def ask(prompt, check, default=""):
 def cmd_add(args):
     if args and len(args) < 3:
         sys.exit('Usage: dw add <minutes> <project> "<description>"   (or just: dw add)')
+    check_log_file(creating=True)
     records = read_records()
     if args:
         try:
@@ -221,14 +267,14 @@ def cmd_add(args):
             project = check_project(args[1])
         except ValueError as e:
             sys.exit(str(e))
-        description = " ".join(args[2:]).strip()
+        description = one_line(" ".join(args[2:]))
     else:
         projects = recent_projects(records)
         minutes = ask("Duration (min)", parse_minutes)
         if projects:
             print("Projects:", ", ".join(projects[:10]))
         project = ask("Project", check_project, projects[0] if projects else "")
-        description = input("Description: ").strip()
+        description = one_line(input("Description: "))
 
     start = datetime.now() - timedelta(minutes=minutes)
     rec = {
@@ -262,6 +308,7 @@ def write_data_js(records):
 
 
 def cmd_stats():
+    check_log_file(creating=False)
     records = read_records()
     write_data_js(records)
     page = WEB_DIR / "index.html"
@@ -270,6 +317,7 @@ def cmd_stats():
 
 
 def cmd_backup():
+    check_log_file(creating=False)
     records = read_records()
     if not records:
         print("Nothing to back up yet.")
