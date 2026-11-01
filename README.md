@@ -1,6 +1,6 @@
 # deepwork-tracker
 
-Track deep work sessions on the way to 10,000 hours. Python (standard library only), a Markdown log, monthly backups, and an animated statistics page in the browser.
+Track deep work sessions on the way to 10,000 hours. Python (standard library only), a Markdown log, monthly backups and a statistics page in the browser.
 
 ## Usage
 
@@ -13,42 +13,47 @@ dw backup                                  # back up all records now (.md + .xls
 
 The time is the session's **start** time: `dw add 90 …` at 11:00 records `09:30`.
 
+## Setup
+
+Needs Python 3.8+.
+
+1. Add an alias to `~/.bashrc` or `~/.zshrc`: `alias dw="python3 /path/to/deepwork-tracker/dw.py"`. On Windows, add the project folder to `PATH` and `dw.bat` does the rest.
+2. Copy `.env.example` to `.env` and set the paths to the log and backup folders. `.env` is ignored by git.
+
+Suggested layout: only the code is shared, the log and backups stay on this computer.
+
+```
+deepwork/
+├── deepwork-tracker/       this repo (public)
+├── deepwork-logs/          deepwork_logs.md, own git repo, no remote
+├── deepwork-backup/        monthly .md backups
+└── deepwork-backup-xlsx/   Excel copies
+```
+
+To make sure the log repo is never pushed, block pushes in it:
+
+```
+printf '#!/bin/sh\necho "local only" >&2\nexit 1\n' > deepwork-logs/.git/hooks/pre-push
+chmod +x deepwork-logs/.git/hooks/pre-push
+```
+
 ## The log
 
-`deepwork_logs.md` holds every record (date, time, minutes, project, description) and is the only source of truth. Write to it through `dw add`, or edit it by hand to fix past records.
+`deepwork_logs.md` holds every record and is the only source of truth. Write to it with `dw add`, or edit it by hand to fix past records. It lives at `DW_LOG_FILE` (default: next to `dw.py`, ignored by git). If you move it, update `.env`: when there's no log at that path, `dw add` starts a new, empty one.
 
 ## Backups
 
-When you add the **first record of a new day**, `dw add` first copies `deepwork_logs.md` to your backup folder. At that moment the log holds every record from your first one up to the last day you logged, so a backup never contains a half-finished day.
+The first `dw add` of a new day copies the log to `DW_BACKUP_DIR/deepwork_logs-YYYY-MM.md`, plus an Excel copy in `DW_XLSX_BACKUP_DIR` (default for both: `~/deepwork-backup`). `dw backup` does the same on demand, including today's records.
 
-```
-~/deepwork-backup/
-├── deepwork_logs-2026-10.md   everything up to the end of October (final)
-└── deepwork_logs-2026-11.md   everything up to the last logged day in November (updated daily)
-```
-
-- **`dw backup`** backs up on demand: all records, including today's, into the same monthly `.md` and `.xlsx` files (named after the newest record's month). The next automatic backup replaces it with the up-to-yesterday version as usual.
-- **One file per month**, named after the month of its newest record. The current month's file is replaced each new day. Once the next month starts, the previous file stays as it is for good.
-- **Locked:** backup files are read-only and the backup folder is locked, so backups can't be edited, renamed or deleted, not even with `rm -rf`. Only `dw add` unlocks them for the moment it saves a backup. To delete backups on purpose, unlock the folder first: `chmod u+w <backup folder>`.
-- **Restore:** copy a backup file back: `cp <backup file> deepwork_logs.md`, then make it editable again: `chmod u+w deepwork_logs.md`.
-- **Excel copy:** each backup is also saved as an Excel file with the same name, e.g. `deepwork_logs-2026-10.xlsx`, with one row per record (Date, Time, Duration, Project, Description). It opens in Excel, LibreOffice and Google Sheets, works with any language and is read-only and locked the same way.
-- **Location:** set `DW_BACKUP_DIR` (and `DW_XLSX_BACKUP_DIR` for the Excel copies) in `.env` (copy `.env.example` to `.env`). Without them, both go to `~/deepwork-backup`. Set `DW_LOG_FILE` to keep the log itself somewhere else (default: `deepwork_logs.md` next to `dw.py`). `.env` is ignored by git, so your path stays private.
-- Backups stay on this computer.
-
-## Setup
-
-Needs Python 3.8+ and git.
-
-- **Linux / macOS:** add to `~/.bashrc` or `~/.zshrc`:
-  `alias dw="python3 /path/to/deepwork-tracker/dw.py"`
-- **Windows:** add the project folder to your `PATH`, and `dw.bat` will make `dw` work.
+- **One file per month.** The current month's file is replaced each day; past months stay final.
+- **Locked.** Backup files are read-only and their folder is locked, so they can't be edited or deleted, even with `rm -rf`. To delete them on purpose: `chmod u+w <backup folder>`. Git can commit locked folders but can't pull or check out into them.
+- **Restore:** `cp <backup file> <log file> && chmod u+w <log file>`.
 
 ## Files
 
 | File | What it is |
 |---|---|
 | `dw.py` | `add`, `stats` and `backup` commands. Only `parse_records()` and `write_record()` know the file format. |
-| `xlsx_backup.py` | Makes the Excel copies of backups (standard library only) |
-| `web/` | Statistics page: `index.html`, `style.css`, `app.js` (no libraries). Uses the full log. |
-| `web/data.js` | Generated by `dw stats` from the log, not committed |
+| `xlsx_backup.py` | Makes the Excel copies of backups |
+| `web/` | Statistics page (no libraries). `web/data.js` is generated by `dw stats` and not committed. |
 | `docs/DEEPWORK_RULES.md` | What counts as deep work |
